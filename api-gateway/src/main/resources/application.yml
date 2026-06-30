@@ -1,0 +1,66 @@
+server:
+  port: 8080
+
+spring:
+  application:
+    name: api-gateway
+
+  cloud:
+    gateway:
+      # Auto-discover all Eureka services and create routes (optional — explicit routes below take priority)
+      discovery:
+        locator:
+          enabled: true
+          lower-case-service-id: true
+
+      routes:
+        # ── Product Service ──────────────────────────────────
+        - id: product-service
+          uri: lb://product-service
+          predicates:
+            - Path=/api/v1/products/**
+
+        # ── Order Service ────────────────────────────────────
+        - id: order-service
+          uri: lb://order-service
+          predicates:
+            - Path=/api/v1/orders/**
+
+# ============================================================
+# EUREKA CLIENT
+# ============================================================
+eureka:
+  client:
+    service-url:
+      defaultZone: http://localhost:8761/eureka
+  instance:
+    prefer-ip-address: true
+
+# ============================================================
+# ACTUATOR
+# ============================================================
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health, info, gateway
+  endpoint:
+    health:
+      show-details: always
+    gateway:
+      enabled: true
+
+info:
+  app:
+    name: API Gateway
+    version: 1.0.0
+
+# ============================================================
+# LOGGING
+# ============================================================
+logging:
+  level:
+    org.springframework.cloud.gateway: INFO
+    reactor.netty: WARN
+  pattern:
+    console: "%d{yyyy-MM-dd HH:mm:ss} [%thread] %-5level %logger{36} - %msg%n"

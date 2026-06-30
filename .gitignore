@@ -1,0 +1,27 @@
+# ── Maven ────────────────────────────────────────────────────
+target/
+!.mvn/wrapper/maven-wrapper.jar
+
+# ── IntelliJ IDEA ────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+out/
+
+# ── Spring Boot ───────────────────────────────────────────────
+*.log
+logs/
+
+# ── Environment / secrets ─────────────────────────────────────
+.env
+*.env.local
+application-local.properties
+
+# ── OS ────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ── Other projects in this directory ──────────────────────────
+Java gfg/
