@@ -86,8 +86,8 @@ com.naveen.<servicename>/
 | **Phase 4** | Eureka Server — service discovery, all services register | ✅ Done |
 | **Phase 5** | API Gateway — single entry point, routes to services via Eureka | ✅ Done |
 | **Phase 6** | Resilience4j — circuit breaker on Feign calls in Order Service | ✅ Done |
-| **Phase 7** | CI/CD — GitHub Actions: build, test, package, Docker build | ⏳ Next |
-| **Phase 8** | GCP Deployment — Cloud Run or GKE, externalized config, secrets | ⏳ Planned |
+| **Phase 7** | CI/CD — GitHub Actions: build, test, package, Docker build | ✅ Done |
+| **Phase 8** | GCP Deployment — Cloud Run or GKE, externalized config, secrets | ⏳ Next |
 
 ---
 
@@ -616,56 +616,84 @@ mvnw.cmd verify                      # tests + JaCoCo coverage check (80% thresh
 
 ---
 
-## 14. What Comes Next — Phase 7: GitHub Actions CI/CD
+## 14. What Is Built — Phase 7: GitHub Actions CI/CD
 
-### Goal
+**Repository:** `https://github.com/rajsreeworks/ecommerce-microservices`
 
-Automate build, test, and Docker image creation on every push/PR so that no broken code can merge to `main`.
+**Registry:** GitHub Container Registry (`ghcr.io`) — uses built-in `GITHUB_TOKEN`, no extra accounts needed.
 
-### Files to create
+### What triggers the pipeline
+
+| Event | Tests run | Docker images pushed |
+|---|---|---|
+| Push to `main` | Yes | Yes — only after tests pass |
+| Pull Request to `main` | Yes | No |
+
+### Pipeline structure
 
 ```
-.github/
-└── workflows/
-    └── ci.yml
-```
-
-### Planned Pipeline
-
-```
-push / PR to main
+push to main
       │
-      ├── Job: build-product-service
-      │     └── Java 17 setup → mvn test → mvn package → docker build
+      ├── test-product-service (~36s with cache)   ./mvnw verify → 28 tests + JaCoCo 80%
       │
-      └── Job: build-order-service  (parallel)
-            └── Java 17 setup → mvn test → mvn package → docker build
+      └── test-order-service   (~38s with cache)   ./mvnw verify → 22 tests + JaCoCo 80%
+                      │
+                      └── both must pass
+                                │
+                    build-and-push (4 services in parallel)
+                    ├── ghcr.io/rajsreeworks/product-service:latest + :<sha>
+                    ├── ghcr.io/rajsreeworks/order-service:latest + :<sha>
+                    ├── ghcr.io/rajsreeworks/eureka-server:latest + :<sha>
+                    └── ghcr.io/rajsreeworks/api-gateway:latest + :<sha>
 ```
 
-### What CI will check
+### File Inventory
 
-- All unit tests pass
-- All integration tests pass (WireMock in-process, no external deps needed)
-- JaCoCo 80% line coverage passes
-- Docker image builds successfully
+```
+.github/workflows/ci.yml    ← full pipeline: test jobs + docker matrix build-and-push
+.gitignore                  ← covers target/, .idea/, *.iml, logs/, .env, OS files
+```
+
+### Key Decisions
+
+- **`needs: [test-product-service, test-order-service]`** — Docker push blocked if any test job fails
+- **`if: github.event_name == 'push' && github.ref == 'refs/heads/main'`** — PRs test only, never push images
+- **`actions/setup-java@v4` with `cache: maven`** — caches `~/.m2`; subsequent runs ~36-38s
+- **Matrix strategy** — all 4 Docker builds run in parallel; total time stays ~3 min regardless of service count
+- **Double tags (`:latest` + `:<git-sha>`)** — `:latest` for convenience, `:<sha>` for reproducible production deploys
 
 ---
 
-## 15. Future Phases Reference
+## 15. What Comes Next — Phase 8: GCP Deployment
 
-### Phase 8 — GCP Deployment
+### Goal
 
-- Cloud Run (serverless) or GKE (Kubernetes)
-- Externalize secrets via GCP Secret Manager
-- Health endpoints already in place (`/actuator/health`)
-- Container images already production-ready (non-root, container-aware JVM flags)
+Deploy all 4 containers to Google Cloud Platform so the API is live on the public internet.
 
-### Phase 8 — GCP Deployment
+### Recommended approach: Cloud Run
 
-- Cloud Run (serverless) or GKE (Kubernetes)
-- Externalize secrets via GCP Secret Manager
-- Health endpoints already in place (`/actuator/health`)
-- Container images already production-ready (non-root, container-aware JVM flags)
+Cloud Run is serverless — you give it a container image, it handles everything else (scaling, HTTPS, load balancing). No Kubernetes needed for this project.
+
+### What's needed (you do these)
+
+1. **Create a GCP account** at `console.cloud.google.com` (free tier available)
+2. **Create a new project** e.g. `ecommerce-microservices`
+3. **Enable APIs**: Cloud Run, Container Registry
+4. **Install `gcloud` CLI**: `https://cloud.google.com/sdk/docs/install`
+5. Tell me your GCP project ID — I'll build the full deploy config
+
+### What's already done (no work needed)
+
+- `/actuator/health` endpoints → Cloud Run uses these for health checks
+- `XX:+UseContainerSupport` JVM flag → Cloud Run is containerized, JVM adapts automatically
+- Non-root user in Dockerfiles → GCP security best practice already followed
+- Docker images live at `ghcr.io/rajsreeworks/*:latest` → Cloud Run can pull directly
+
+---
+
+## 16. Future Reference
+
+_(Nothing planned beyond Phase 8 for this project)_
 
 ---
 
@@ -688,18 +716,22 @@ push / PR to main
 | 13 | `src/test/resources/application.properties` silently shadows the main one on the test classpath | Maven puts test-classpath ahead of main-classpath; Spring Boot finds and loads only the first `application.properties` it sees | Any Spring/Feign/Cloud property that is only in the main properties file is NOT active in tests. Repeat all critical non-business properties in the test file |
 | 14 | `fallbackFactory` on `@FeignClient` does nothing without `spring.cloud.openfeign.circuitbreaker.enabled=true` | The fallback factory attribute is silently ignored if Feign's circuit breaker support is not enabled | Add `spring.cloud.openfeign.circuitbreaker.enabled=true` to both main and test `application.properties`. Also add `circuitbreaker.group.enabled=true` to group all methods of one client under a single CB |
 | 15 | After removing try-catch from `OrderServiceImpl`, unit tests that mock `FeignException` break | Unit tests (`@ExtendWith(MockitoExtension.class)`) have no Spring context and no CB infrastructure, so the fallback factory is never called. Raw `FeignException` bubbles up uncaught | In unit tests, mock the domain exceptions directly (`ResourceNotFoundException`, `ProductServiceException`) — this tests `OrderServiceImpl`'s contract, not Feign internals |
+| 16 | `mvnw` committed from Windows fails in Linux CI with "Permission denied" | Git on Windows commits files as `100644` (not executable). Linux Docker runners cannot run `./mvnw` | Run `git update-index --chmod=+x */mvnw` once per service to record `100755` in the git index. All future Linux checkouts will have +x automatically |
 
 ---
 
 ## 17. Project Directory Layout
 
 ```
-C:\Users\srajs\IdeaProjects\
-├── product-service\           ✅ Complete (Phase 1 + Eureka client)
-├── order-service\             ✅ Complete (Phase 2 + Eureka client + Resilience4j circuit breaker)
-├── eureka-server\             ✅ Complete (Phase 4)
-├── api-gateway\               ✅ Complete (Phase 5)
-└── docker-compose.yml         ✅ Complete (Phase 3 — all 4 services)
+C:\Users\srajs\IdeaProjects\           (git root → github.com/rajsreeworks/ecommerce-microservices)
+├── .github/workflows/ci.yml           ✅ Complete (Phase 7 — CI/CD)
+├── .gitignore
+├── docker-compose.yml                 ✅ Complete (Phase 3 — all 4 services)
+├── ECOMMERCE_PROJECT_CONTEXT.md       ← this document
+├── product-service\                   ✅ Complete (Phase 1 + Eureka client)
+├── order-service\                     ✅ Complete (Phase 2 + Eureka client + Resilience4j)
+├── eureka-server\                     ✅ Complete (Phase 4)
+└── api-gateway\                       ✅ Complete (Phase 5)
 ```
 
 ---
